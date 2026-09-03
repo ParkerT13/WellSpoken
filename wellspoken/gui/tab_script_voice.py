@@ -158,7 +158,7 @@ class ScriptVoiceTab(QWidget):
                 wav_path, source="tts",
                 initial_prompt=self.app.lexicon.prompt_text(), lexicon=self.app.lexicon,
             )
-            segments = reconcile_tts_captions(segments, script)
+            segments = reconcile_tts_captions(segments, script, lexicon=self.app.lexicon)
             return wav_path, segments
 
         def done(result):

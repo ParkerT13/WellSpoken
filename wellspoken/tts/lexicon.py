@@ -60,6 +60,21 @@ class Lexicon:
         candidates = [w for w in self.overrides if not (w.isupper() and len(w) <= 5)]
         return ", ".join(candidates[: self.MAX_PROMPT_TERMS])
 
+    def _pattern(self) -> re.Pattern:
+        # Trailing ('s|s)? catches plurals/possessives with no apostrophe
+        # ("SeisWares") as well as with one ("SeisWare's") - a bare \b right
+        # after the term only matches when the NEXT character is already a
+        # non-word boundary, so "SeisWares" (no break between "SeisWare" and
+        # the trailing s) silently failed to match at all and passed through
+        # unrespelled/uncorrected (verified empirically - a real regression
+        # report). The captured suffix is re-appended after substitution so
+        # "SeisWares" -> "Size-wheres" and "SeisWare's" -> "Size-where's",
+        # not just bare "SeisWare" ones.
+        return re.compile(
+            r"\b(" + "|".join(re.escape(w) for w in self.overrides) + r")('s|s)?\b",
+            flags=re.IGNORECASE,
+        )
+
     def canonicalize(self, text: str) -> str:
         """Fix the capitalization of any lexicon key found (case-insensitively)
         in `text` to its exact canonical spelling - e.g. "Seisware" ->
@@ -71,30 +86,22 @@ class Lexicon:
         before TTS, not correcting spelling after ASR)."""
         if not self.overrides:
             return text
-        pattern = re.compile(
-            r"\b(" + "|".join(re.escape(w) for w in self.overrides) + r")\b",
-            flags=re.IGNORECASE,
-        )
         canonical = {w.lower(): w for w in self.overrides}
 
         def _sub(match: re.Match) -> str:
-            return canonical[match.group(0).lower()]
+            suffix = match.group(2) or ""
+            return canonical[match.group(1).lower()] + suffix
 
-        return pattern.sub(_sub, text)
+        return self._pattern().sub(_sub, text)
 
     def apply(self, text: str) -> str:
         """Case-preserving whole-word substitution of every override in text."""
         if not self.overrides:
             return text
-        pattern = re.compile(
-            r"\b(" + "|".join(re.escape(w) for w in self.overrides) + r")\b",
-            flags=re.IGNORECASE,
-        )
+        lookup = {w.lower(): r for w, r in self.overrides.items()}
 
         def _sub(match: re.Match) -> str:
-            for word, respelling in self.overrides.items():
-                if word.lower() == match.group(0).lower():
-                    return respelling
-            return match.group(0)
+            suffix = match.group(2) or ""
+            return lookup[match.group(1).lower()] + suffix
 
-        return pattern.sub(_sub, text)
+        return self._pattern().sub(_sub, text)

@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import difflib
 import re
+from typing import TYPE_CHECKING, Optional
 
 from wellspoken.captions.align import group_words_into_segments
 from wellspoken.models import CaptionSegment, WordTiming
+
+if TYPE_CHECKING:
+    from wellspoken.tts.lexicon import Lexicon
 
 _WORD_RE = re.compile(r"[A-Za-z0-9']+")
 
@@ -14,7 +18,7 @@ def _norm(token: str) -> str:
 
 
 def reconcile_tts_captions(
-    heard_segments: list[CaptionSegment], intended_script: str
+    heard_segments: list[CaptionSegment], intended_script: str, lexicon: Optional["Lexicon"] = None
 ) -> list[CaptionSegment]:
     """Rebuild caption segments using the intended script's own wording (correct
     spelling/punctuation) with timestamps taken from the synthesized narration
@@ -28,7 +32,17 @@ def reconcile_tts_captions(
     heard audio doesn't line up with the script at all (a real dropped or
     garbled word), the segment is flagged so the user can add a pronunciation
     lexicon override and re-synthesize.
+
+    Because captions always come from intended_script (never from what
+    Whisper heard), a whisper_engine.transcribe(lexicon=...) fix on the ASR
+    side never reaches these captions at all - if the user typed "Seisware"
+    with a lowercase w, that's exactly what would show up here regardless.
+    lexicon.canonicalize() run on the script up front is what actually fixes
+    known terms' capitalization for this workflow (verified: this was a real
+    reported gap - the ASR-side fix alone did nothing for AI Voice captions).
     """
+    if lexicon:
+        intended_script = lexicon.canonicalize(intended_script)
     heard_words: list[WordTiming] = [w for seg in heard_segments for w in seg.words]
     intended_tokens = intended_script.split()
 
