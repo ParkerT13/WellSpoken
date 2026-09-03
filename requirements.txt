@@ -1,0 +1,13 @@
+kokoro
+faster-whisper
+imageio-ffmpeg
+moviepy
+Pillow
+PySide6
+windows-capture
+pyqtgraph
+chatterbox-tts
+# chatterbox-tts's audio watermarker (resemble-perth) needs pkg_resources,
+# which setuptools >=81 removed - without this pin, ChatterboxEngine raises
+# TypeError: 'NoneType' object is not callable on first use.
+setuptools<81

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg" cx="35%" cy="30%" r="80%">
+      <stop offset="0%" stop-color="#FFC15E"/>
+      <stop offset="55%" stop-color="#F5A623"/>
+      <stop offset="100%" stop-color="#C1440E"/>
+    </radialGradient>
+    <linearGradient id="drop" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#F3EFE7"/>
+    </linearGradient>
+    <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#5C2A00" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <circle cx="256" cy="256" r="248" fill="url(#bg)"/>
+
+  <g filter="url(#soft-shadow)">
+    <path d="M256 96
+             C256 96 158 214 158 292
+             C158 351.5 201.5 396 256 396
+             C310.5 396 354 351.5 354 292
+             C354 214 256 96 256 96 Z"
+          fill="url(#drop)"/>
+  </g>
+
+  <g stroke="#1B2430" stroke-width="22" stroke-linecap="round">
+    <line x1="205" y1="270" x2="205" y2="322"/>
+    <line x1="256" y1="240" x2="256" y2="352"/>
+    <line x1="307" y1="270" x2="307" y2="322"/>
+  </g>
+</svg>

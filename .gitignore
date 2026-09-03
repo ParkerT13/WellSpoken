@@ -1,0 +1,9 @@
+env/
+__pycache__/
+*.pyc
+scratch/
+*.wav
+*.mp4
+*.mkv
+.vscode/
+Test.json
