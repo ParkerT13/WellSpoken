@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from wellspoken.gui.monitor_highlight import MonitorHighlight
 from wellspoken.gui.region_picker import select_region
 from wellspoken.gui.widgets import ProgressBar, make_hint_label
 from wellspoken.media import recorder
@@ -43,6 +44,7 @@ class RecordTab(QWidget):
         self._start_time: float | None = None
         self._elapsed_before_pause: float = 0.0
         self._region = None  # QRect, logical global screen coords, from region_picker
+        self._monitor_highlight: MonitorHighlight | None = None
 
         layout = QVBoxLayout(self)
         layout.addWidget(make_hint_label(
@@ -63,6 +65,7 @@ class RecordTab(QWidget):
         self.monitor_row.addWidget(QLabel("Monitor:"))
         self.monitor_combo = QComboBox()
         self._refresh_monitors()
+        self.monitor_combo.currentIndexChanged.connect(self._update_monitor_highlight)
         self.monitor_row.addWidget(self.monitor_combo, stretch=1)
         self._monitor_widget = QWidget()
         self._monitor_widget.setLayout(self.monitor_row)
@@ -167,6 +170,43 @@ class RecordTab(QWidget):
         self._region_widget.setVisible(self.region_radio.isChecked())
         if self.window_radio.isChecked() and self.window_combo.count() == 0:
             self._refresh_windows()
+        self._update_monitor_highlight()
+
+    def _update_monitor_highlight(self, *_args) -> None:
+        """Shows a yellow border around the currently-selected monitor, so
+        it's clear which physical screen "Monitor 2" etc. actually refers to
+        before recording starts - mirrors WGC's own native yellow border
+        that appears once recording is actually running."""
+        show_it = (
+            self._session is None  # WGC's own border takes over once actually recording - don't double up
+            and self.isVisible()
+            and self.fullscreen_radio.isChecked()
+        )
+        monitor_index = self.monitor_combo.currentData() if show_it else None
+        if monitor_index is None:
+            self._hide_monitor_highlight()
+            return
+        monitors = recorder.list_monitors()
+        if monitor_index >= len(monitors):
+            self._hide_monitor_highlight()
+            return
+        x, y, w, h = monitors[monitor_index]
+        if self._monitor_highlight is None:
+            self._monitor_highlight = MonitorHighlight()
+        self._monitor_highlight.setGeometry(x, y, w, h)
+        self._monitor_highlight.show()
+
+    def _hide_monitor_highlight(self) -> None:
+        if self._monitor_highlight is not None:
+            self._monitor_highlight.hide()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._update_monitor_highlight()
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        self._hide_monitor_highlight()
 
     def _pick_region(self) -> None:
         main_window = self.window()
@@ -254,6 +294,7 @@ class RecordTab(QWidget):
             QMessageBox.critical(self, "Could not start recording", str(exc))
             return
 
+        self._hide_monitor_highlight()  # WGC's own native border takes over now that capture is actually running
         self._elapsed_before_pause = 0.0
         self._start_time = time.time()
         self._timer.start(1000)
@@ -353,6 +394,7 @@ class RecordTab(QWidget):
                 self.use_recording_btn.setEnabled(True)
             else:
                 self.output_label.setText("Recording failed - no output file was created.")
+            self._update_monitor_highlight()
 
         def error(tb: str) -> None:
             self.record_btn.setEnabled(True)
