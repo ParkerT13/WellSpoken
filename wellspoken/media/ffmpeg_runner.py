@@ -190,6 +190,36 @@ def extract_range(src_path: str | Path, start: float, end: float, out_path: str 
     return out_path
 
 
+def concat_with_delays(pieces: list[tuple[str | Path, float]], out_path: str | Path, sample_rate: int = 24000) -> Path:
+    """Mix N mono audio pieces into one track, each starting at its own
+    absolute delay in seconds rather than played back-to-back - used for
+    marker-synced narration (see media/sync.py) where each script segment
+    must start at a specific video timestamp, padded with silence rather
+    than concatenated immediately after the previous one. Pieces never
+    overlap by construction (sync.py only advances the cursor forward), so
+    amix with normalize=0 is an exact combine, not a lossy approximation -
+    without normalize=0, amix auto-attenuates every input by ~1/N to guard
+    against clipping from simultaneous sources, which would make a
+    many-paragraph narration quieter than a single-piece one for no reason
+    here, since only one piece is ever actually sounding at a time."""
+    out_path = Path(out_path)
+    args = []
+    for p, _delay in pieces:
+        args += ["-i", str(p)]
+    filter_parts = []
+    labels = []
+    for i, (_p, delay) in enumerate(pieces):
+        delay_ms = max(0, round(delay * 1000))
+        filter_parts.append(
+            f"[{i}:a]aresample={sample_rate},aformat=channel_layouts=mono,adelay={delay_ms}:all=1[a{i}]"
+        )
+        labels.append(f"[a{i}]")
+    filter_parts.append(f"{''.join(labels)}amix=inputs={len(pieces)}:duration=longest:dropout_transition=0:normalize=0[aout]")
+    args += ["-filter_complex", ";".join(filter_parts), "-map", "[aout]", str(out_path)]
+    run(args)
+    return out_path
+
+
 def mix_background_music(
     video_path: str | Path, music_path: str | Path, out_path: str | Path, music_volume: float = 0.15
 ) -> Path:

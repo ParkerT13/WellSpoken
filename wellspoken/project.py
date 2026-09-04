@@ -33,6 +33,7 @@ class Project:
     voice_name: str = "af_heart"
     output_dir: Optional[str] = None
     aspect_ratio: Literal["original", "16:9", "9:16", "1:1"] = "original"
+    sync_markers: list[float] = field(default_factory=list)  # video timestamps (seconds) script paragraphs sync to
 
     def to_dict(self) -> dict:
         d = asdict(self)

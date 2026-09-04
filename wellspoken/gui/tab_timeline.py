@@ -10,21 +10,25 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QListWidget,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from wellspoken.captions.qc import reconcile_tts_captions
 from wellspoken.gui.tab_intro_outro import DEFAULT_LOGO_PATH
 from wellspoken.gui.widgets import ProgressBar, make_hint_label
-from wellspoken.media import audio_mix, ffmpeg_runner, silence, timeline_edit, waveform
+from wellspoken.media import audio_mix, ffmpeg_runner, silence, sync, timeline_edit, waveform
 from wellspoken.media.render_pipeline import IntroOutroSpec, RenderOptions, render
+from wellspoken.transcribe.whisper_engine import transcribe
 from wellspoken.workers import BackgroundTask
 
 WAVEFORM_WIDTH = 2000
 SELECTION_BRUSH = pg.mkBrush(47, 111, 237, 80)
 PENDING_CUT_BRUSH = pg.mkBrush(220, 60, 60, 100)
+MARKER_PEN = pg.mkPen(color=(30, 160, 60), width=2)
 
 
 class TimelineTab(QWidget):
@@ -34,6 +38,8 @@ class TimelineTab(QWidget):
         self.cut_ranges: list[tuple[float, float]] = []
         self.pending_markers: list[pg.LinearRegionItem] = []
         self.duration = 0.0
+        self.markers: list[float] = []
+        self.marker_lines: list[pg.InfiniteLine] = []
 
         layout = QVBoxLayout(self)
         layout.addWidget(make_hint_label(
@@ -114,6 +120,43 @@ class TimelineTab(QWidget):
         self.apply_btn.clicked.connect(self._apply_cuts)
         layout.addWidget(self.apply_btn)
 
+        layout.addWidget(make_hint_label(
+            "Sync markers: play the video above and click \"Add Marker at Playhead\" at each moment "
+            "your script should land on (a click, a menu opening, etc.) - they show as green lines "
+            "on the timeline above, right alongside the narration waveform. Split your script (in "
+            "Script -> Voice) into paragraphs with a blank line between them - paragraph 1 syncs to "
+            "marker 1, paragraph 2 to marker 2, and so on. \"Generate Synced Narration\" re-synthesizes "
+            "the whole script, padding each paragraph with silence so it starts exactly on its marker; "
+            "it never speeds up speech to force a fit, so if a line runs long it'll flag which one so "
+            "you can shorten it and try again."
+        ))
+
+        marker_row = QHBoxLayout()
+        add_marker_btn = QPushButton("Add Marker at Playhead")
+        add_marker_btn.setProperty("flat", True)
+        add_marker_btn.clicked.connect(self._add_marker)
+        remove_marker_btn = QPushButton("Remove Selected Marker")
+        remove_marker_btn.setProperty("flat", True)
+        remove_marker_btn.clicked.connect(self._remove_selected_marker)
+        clear_markers_btn = QPushButton("Clear All Markers")
+        clear_markers_btn.setProperty("flat", True)
+        clear_markers_btn.clicked.connect(self._clear_markers)
+        marker_row.addWidget(add_marker_btn)
+        marker_row.addWidget(remove_marker_btn)
+        marker_row.addWidget(clear_markers_btn)
+        marker_row.addStretch(1)
+        layout.addLayout(marker_row)
+
+        self.marker_list = QListWidget()
+        self.marker_list.setMaximumHeight(90)
+        self.marker_list.itemDoubleClicked.connect(self._seek_to_marker_item)
+        layout.addWidget(self.marker_list)
+
+        self.generate_synced_btn = QPushButton("Generate Synced Narration")
+        self.generate_synced_btn.clicked.connect(self._generate_synced_narration)
+        self.app.register_busy_widget(self.generate_synced_btn)
+        layout.addWidget(self.generate_synced_btn)
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if self.duration == 0.0:
@@ -127,6 +170,9 @@ class TimelineTab(QWidget):
         self.media_player.stop()
         self.plot.clear()
         self._clear_pending()
+        self.marker_lines.clear()
+        self.markers = []
+        self.marker_list.clear()
         self.duration = 0.0
 
     def reload(self) -> None:
@@ -165,6 +211,9 @@ class TimelineTab(QWidget):
             self.duration = dur
             self._render_waveform(samples, dur)
             self._clear_pending()
+            self.markers = list(project.sync_markers)
+            self._redraw_marker_lines()
+            self._refresh_marker_list()
             if preview_source:
                 self.media_player.setSource(QUrl.fromLocalFile(preview_source))
             self.progress.stop("")
@@ -358,3 +407,112 @@ class TimelineTab(QWidget):
             QMessageBox.critical(self, "Apply failed", tb)
 
         BackgroundTask(self, work, done, on_error=error).start()
+
+    def _add_marker(self) -> None:
+        if self.duration <= 0:
+            QMessageBox.information(self, "No video loaded", "Load a project with a video first.")
+            return
+        t = self.media_player.position() / 1000.0
+        self.markers.append(t)
+        self.markers.sort()
+        self.app.project.sync_markers = list(self.markers)
+        self._redraw_marker_lines()
+        self._refresh_marker_list()
+
+    def _remove_selected_marker(self) -> None:
+        row = self.marker_list.currentRow()
+        if row < 0:
+            return
+        del self.markers[row]
+        self.app.project.sync_markers = list(self.markers)
+        self._redraw_marker_lines()
+        self._refresh_marker_list()
+
+    def _clear_markers(self) -> None:
+        self.markers = []
+        self.app.project.sync_markers = []
+        self._redraw_marker_lines()
+        self._refresh_marker_list()
+
+    def _redraw_marker_lines(self) -> None:
+        for line in self.marker_lines:
+            self.plot.removeItem(line)
+        self.marker_lines = []
+        for t in self.markers:
+            line = pg.InfiniteLine(pos=t, angle=90, pen=MARKER_PEN, movable=False)
+            self.plot.addItem(line)
+            self.marker_lines.append(line)
+
+    def _refresh_marker_list(self) -> None:
+        self.marker_list.clear()
+        for i, t in enumerate(self.markers, start=1):
+            self.marker_list.addItem(f"Marker {i}: {t:.2f}s")
+
+    def _seek_to_marker_item(self, item) -> None:
+        row = self.marker_list.row(item)
+        if 0 <= row < len(self.markers):
+            self.media_player.setPosition(int(self.markers[row] * 1000))
+
+    def _generate_synced_narration(self) -> None:
+        if self.app._busy_count > 0:
+            QMessageBox.information(self, "Busy", "Another operation is in progress - please wait for it to finish.")
+            return
+        project = self.app.project
+        script = project.script_text.strip()
+        if not script:
+            QMessageBox.information(self, "No script", "Write a script in the Script -> Voice tab first.")
+            return
+        if not self.markers:
+            QMessageBox.information(self, "No markers", "Add at least one marker on the timeline above first.")
+            return
+        paragraphs = sync.split_script_into_paragraphs(script)
+        if len(paragraphs) < len(self.markers):
+            QMessageBox.warning(
+                self, "Fewer paragraphs than markers",
+                f"The script has {len(paragraphs)} paragraph(s) (separated by a blank line) but there "
+                f"are {len(self.markers)} marker(s) - the extra marker(s) at the end won't be used. "
+                "Add blank lines to split the script further if you meant to sync more of it.",
+            )
+
+        self.progress.start("Loading voice model...")
+        markers = list(self.markers)
+
+        def work(report):
+            engine = self.app.get_voice_engine(project.voice_name)
+            wav_path, reports = sync.synthesize_with_markers(
+                engine, script, markers, self.app.scratch_dir() / "narration.wav",
+                self.app.scratch_dir() / "sync_pieces", on_progress=report,
+            )
+            report("Transcribing narration for timing + QC...")
+            segments = transcribe(
+                wav_path, source="tts",
+                initial_prompt=self.app.lexicon.prompt_text(), lexicon=self.app.lexicon,
+            )
+            segments = reconcile_tts_captions(segments, script, lexicon=self.app.lexicon)
+            return wav_path, segments, reports
+
+        def done(result) -> None:
+            self.app.set_busy(False)
+            wav_path, segments, reports = result
+            project.narration_audio = str(wav_path)
+            project.segments = segments
+            project.workflow = "script"
+            self.progress.stop("Synced narration generated.")
+            overruns = [r for r in reports if r.overrun > 0.05]
+            if overruns:
+                lines = "\n".join(f"- Line {r.index + 1} ran {r.overrun:.1f}s past its marker" for r in overruns)
+                QMessageBox.warning(
+                    self, "Some lines ran long",
+                    "These lines took longer to say than the gap to their marker, so everything after "
+                    "them was pushed later to stay in order (no audio was sped up or distorted):\n\n"
+                    f"{lines}\n\nShorten them and regenerate for a tighter sync.",
+                )
+            self.reload()
+
+        def error(tb: str) -> None:
+            self.app.set_busy(False)
+            self.progress.stop("Failed.")
+            QMessageBox.critical(self, "Synced narration generation failed", tb)
+
+        self.app.set_busy(True)
+        BackgroundTask(self, work, done, on_error=error, on_progress=self.progress.set_message).start()
