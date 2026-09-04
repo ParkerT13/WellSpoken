@@ -99,13 +99,26 @@ class ScriptVoiceTab(QWidget):
         gen_btn = QPushButton("Generate Voice + Captions")
         gen_btn.clicked.connect(self.generate)
         self.app.register_busy_widget(gen_btn)
+        preview_btn = QPushButton("Preview Voice")
+        preview_btn.setProperty("flat", True)
+        preview_btn.clicked.connect(self.preview_voice)
+        self.app.register_busy_widget(preview_btn)
         play_btn = QPushButton("Play Narration")
         play_btn.setProperty("flat", True)
         play_btn.clicked.connect(self.play_narration)
         actions.addWidget(gen_btn)
+        actions.addWidget(preview_btn)
         actions.addWidget(play_btn)
         actions.addStretch(1)
         layout.addLayout(actions)
+        preview_hint = QLabel(
+            "Preview Voice just synthesizes and plays - no transcription/captions - so you can "
+            "flip between voices quickly. It doesn't touch the project's saved narration; use "
+            "Generate Voice + Captions to actually commit a voice to the project."
+        )
+        preview_hint.setProperty("muted", True)
+        preview_hint.setWordWrap(True)
+        layout.addWidget(preview_hint)
 
         self.progress = ProgressBar()
         layout.addWidget(self.progress)
@@ -262,6 +275,38 @@ class ScriptVoiceTab(QWidget):
             self.app.set_busy(False)
             self.progress.stop("Failed.")
             QMessageBox.critical(self, "Voice generation failed", tb)
+
+        self.app.set_busy(True)
+        BackgroundTask(self, work, done, on_error=error, on_progress=self.progress.set_message).start()
+
+    def preview_voice(self) -> None:
+        if self.app._busy_count > 0:
+            QMessageBox.information(self, "Busy", "Another operation is in progress - please wait for it to finish.")
+            return
+        script = self.script_edit.toPlainText().strip()
+        if not script:
+            QMessageBox.information(self, "No script", "Type a script first.")
+            return
+        voice_name = self.voice_combo.currentData()
+        self.progress.start("Loading voice model...")
+
+        def work(report):
+            engine = self.app.get_voice_engine(voice_name)
+            report("Synthesizing preview...")
+            # A separate file from project.narration_audio - previewing a
+            # voice must never overwrite the narration actually committed to
+            # the project via Generate Voice + Captions.
+            return engine.synthesize_to_wav(script, self.app.scratch_dir() / "voice_preview.wav", on_progress=report)
+
+        def done(wav_path) -> None:
+            self.app.set_busy(False)
+            self.progress.stop("Preview ready.")
+            os.startfile(wav_path)
+
+        def error(tb: str) -> None:
+            self.app.set_busy(False)
+            self.progress.stop("Failed.")
+            QMessageBox.critical(self, "Preview failed", tb)
 
         self.app.set_busy(True)
         BackgroundTask(self, work, done, on_error=error, on_progress=self.progress.set_message).start()
