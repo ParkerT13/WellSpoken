@@ -23,5 +23,5 @@ def all_voices() -> list[tuple[str, str, str]]:
     clones from an arbitrary reference clip."""
     from wellspoken.tts.custom_voices import load_custom_voices
 
-    custom = [(cv.voice_id, f"{cv.label} (Cloned)", "chatterbox") for cv in load_custom_voices()]
+    custom = [(cv.voice_id, cv.label, "chatterbox") for cv in load_custom_voices()]
     return CURATED_VOICES + custom
