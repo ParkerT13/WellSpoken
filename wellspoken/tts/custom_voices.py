@@ -28,6 +28,13 @@ class CustomVoice:
     voice_id: str
     label: str
     ref_clip: str  # filename within CUSTOM_VOICES_DIR
+    # Playback speed multiplier applied after synthesis (ffmpeg atempo) -
+    # Chatterbox-Turbo has no pacing/tempo parameter of its own (verified:
+    # generate()'s only knobs are repetition_penalty/min_p/top_p/exaggeration/
+    # cfg_weight/temperature/top_k, none control rate), so a reference clip
+    # that was itself read slowly clones as slow speech with no way to ask
+    # the model for a faster delivery - this is the only lever available.
+    speed: float = 1.0
 
     @property
     def ref_clip_path(self) -> Path:
@@ -108,3 +115,18 @@ def remove_custom_voice(voice_id: str) -> None:
     entries = [e for e in _load_manifest() if e["voice_id"] != voice_id]
     _save_manifest(entries)
     cv.ref_clip_path.unlink(missing_ok=True)
+
+
+def set_voice_speed(voice_id: str, speed: float) -> None:
+    entries = _load_manifest()
+    for e in entries:
+        if e["voice_id"] == voice_id:
+            e["speed"] = speed
+    _save_manifest(entries)
+
+
+def reorder_custom_voices(voice_ids_in_order: list[str]) -> None:
+    """Reorder the manifest to match voice_ids_in_order - controls the
+    order custom voices appear after the curated ones in all_voices()."""
+    entries = {e["voice_id"]: e for e in _load_manifest()}
+    _save_manifest([entries[vid] for vid in voice_ids_in_order if vid in entries])

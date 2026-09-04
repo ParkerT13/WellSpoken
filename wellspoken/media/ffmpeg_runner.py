@@ -190,6 +190,16 @@ def extract_range(src_path: str | Path, start: float, end: float, out_path: str 
     return out_path
 
 
+def apply_speed(in_path: str | Path, out_path: str | Path, speed: float) -> Path:
+    """Time-stretch audio by `speed` (>1 = faster) without changing pitch, via
+    ffmpeg's atempo filter. atempo only accepts 0.5-2.0 per instance - not a
+    real constraint here since any voice needing more correction than that
+    has a deeper problem than tempo."""
+    out_path = Path(out_path)
+    run(["-i", str(in_path), "-af", f"atempo={speed}", str(out_path)])
+    return out_path
+
+
 def concat_with_delays(pieces: list[tuple[str | Path, float]], out_path: str | Path, sample_rate: int = 24000) -> Path:
     """Mix N mono audio pieces into one track, each starting at its own
     absolute delay in seconds rather than played back-to-back - used for

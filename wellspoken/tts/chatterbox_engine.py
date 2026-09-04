@@ -63,6 +63,7 @@ class ChatterboxEngine:
     def __init__(self, voice_id: str, lexicon: Lexicon | None = None):
         self.voice_id = voice_id
         self.lexicon = lexicon or Lexicon()
+        self.speed = 1.0
         if voice_id in REFERENCE_CLIPS:
             self.ref_clip = REFERENCE_CLIPS[voice_id]
         else:
@@ -75,6 +76,7 @@ class ChatterboxEngine:
             if custom is None:
                 raise ValueError(f"Unknown Chatterbox voice_id: {voice_id!r}")
             self.ref_clip = custom.ref_clip_path
+            self.speed = custom.speed
 
     def synthesize_to_wav(self, text: str, wav_path: str | Path, on_progress=None) -> Path:
         import torch
@@ -99,4 +101,11 @@ class ChatterboxEngine:
             waveforms.append(model.generate(chunk, audio_prompt_path=str(self.ref_clip)))
         wav = waveforms[0] if len(waveforms) == 1 else torch.cat(waveforms, dim=-1)
         ta.save(str(wav_path), wav.cpu(), model.sr)
+
+        if self.speed != 1.0:
+            from wellspoken.media.ffmpeg_runner import apply_speed
+
+            sped_path = wav_path.with_name(wav_path.stem + "_sped" + wav_path.suffix)
+            apply_speed(wav_path, sped_path, self.speed)
+            sped_path.replace(wav_path)
         return wav_path
