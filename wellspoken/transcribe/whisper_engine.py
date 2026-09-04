@@ -3,6 +3,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+# Must run before faster_whisper is ever imported (by this module or anything
+# importing it) - see warm_up_cuda_cudnn()'s docstring for why. This is the
+# actual source of the CTranslate2/torch cuDNN conflict, so the fix lives
+# here rather than relying on every caller to warm up CUDA first themselves.
+from wellspoken.device import warm_up_cuda_cudnn
+
+warm_up_cuda_cudnn()
+
 from faster_whisper import WhisperModel
 
 from wellspoken.captions.align import group_words_into_segments
@@ -27,6 +35,9 @@ _REPEAT_PHRASE_RE = re.compile(r"\b(\w+(?:\s+\w+){0,4})\b(?:[\s.,!?]+\1\b){2,}",
 
 def get_model(model_size: str = DEFAULT_MODEL_SIZE) -> WhisperModel:
     if model_size not in _model_cache:
+        # Deliberately CPU, not wellspoken.device.get_device() - see the
+        # docstring there for why faster-whisper's CUDA path conflicts with
+        # Kokoro/Chatterbox's.
         _model_cache[model_size] = WhisperModel(model_size, device="cpu", compute_type="int8")
     return _model_cache[model_size]
 

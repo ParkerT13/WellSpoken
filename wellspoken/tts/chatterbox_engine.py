@@ -37,7 +37,9 @@ def _get_model():
     if _model is None:
         from chatterbox.tts_turbo import ChatterboxTurboTTS
 
-        _model = ChatterboxTurboTTS.from_pretrained(device="cpu")
+        from wellspoken.device import get_device
+
+        _model = ChatterboxTurboTTS.from_pretrained(device=get_device())
     return _model
 
 
@@ -96,5 +98,5 @@ class ChatterboxEngine:
                 on_progress(f"Synthesizing narration (part {i} of {len(chunks)})...")
             waveforms.append(model.generate(chunk, audio_prompt_path=str(self.ref_clip)))
         wav = waveforms[0] if len(waveforms) == 1 else torch.cat(waveforms, dim=-1)
-        ta.save(str(wav_path), wav, model.sr)
+        ta.save(str(wav_path), wav.cpu(), model.sr)
         return wav_path

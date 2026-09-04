@@ -1,3 +1,11 @@
+# CUDA-enabled torch build - falls back to CPU automatically at runtime on a
+# machine with no NVIDIA GPU (torch.cuda.is_available() just returns False),
+# so this is safe to install everywhere, not only GPU machines. cu118 chosen
+# for broad driver compatibility (works with older drivers too, not just
+# recent ones) rather than the newest CUDA toolkit version.
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.6.0+cu118
+torchaudio==2.6.0+cu118
 kokoro
 faster-whisper
 imageio-ffmpeg

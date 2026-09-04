@@ -62,7 +62,9 @@ def _get_pipeline(lang_code: str):
     from kokoro import KPipeline
 
     if lang_code not in _pipelines:
-        _pipelines[lang_code] = KPipeline(lang_code=lang_code)
+        from wellspoken.device import get_device
+
+        _pipelines[lang_code] = KPipeline(lang_code=lang_code, device=get_device())
     return _pipelines[lang_code]
 
 
