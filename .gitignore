@@ -7,3 +7,4 @@ scratch/
 *.mkv
 .vscode/
 Test.json
+assets/voice_refs/custom/

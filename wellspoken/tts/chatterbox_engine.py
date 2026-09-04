@@ -59,11 +59,20 @@ def _chunk_text(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
 
 class ChatterboxEngine:
     def __init__(self, voice_id: str, lexicon: Lexicon | None = None):
-        if voice_id not in REFERENCE_CLIPS:
-            raise ValueError(f"Unknown Chatterbox voice_id: {voice_id!r}")
         self.voice_id = voice_id
         self.lexicon = lexicon or Lexicon()
-        self.ref_clip = REFERENCE_CLIPS[voice_id]
+        if voice_id in REFERENCE_CLIPS:
+            self.ref_clip = REFERENCE_CLIPS[voice_id]
+        else:
+            # Not a curated preset - check user-imported/cloned voices
+            # (see custom_voices.py), which use this same zero-shot cloning
+            # engine with a different reference clip.
+            from wellspoken.tts.custom_voices import get_custom_voice
+
+            custom = get_custom_voice(voice_id)
+            if custom is None:
+                raise ValueError(f"Unknown Chatterbox voice_id: {voice_id!r}")
+            self.ref_clip = custom.ref_clip_path
 
     def synthesize_to_wav(self, text: str, wav_path: str | Path, on_progress=None) -> Path:
         import torch

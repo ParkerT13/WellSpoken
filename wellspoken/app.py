@@ -136,7 +136,10 @@ class App(QMainWindow):
         from wellspoken.tts.voices import VOICE_ENGINES
 
         if self._voice_engine is None or self._voice_id != voice_id:
-            engine_name = VOICE_ENGINES[voice_id]
+            # Custom/cloned voices (see custom_voices.py) aren't in the static
+            # VOICE_ENGINES map - they're always chatterbox, the only engine
+            # that clones from an arbitrary reference clip.
+            engine_name = VOICE_ENGINES.get(voice_id, "chatterbox")
             if engine_name == "kokoro":
                 from wellspoken.tts.kokoro_engine import KokoroEngine
 

@@ -4,8 +4,10 @@ import os
 
 from PySide6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -19,7 +21,8 @@ from PySide6.QtWidgets import (
 from wellspoken.captions.qc import reconcile_tts_captions
 from wellspoken.gui.widgets import ProgressBar, make_hint_label
 from wellspoken.transcribe.whisper_engine import transcribe
-from wellspoken.tts.voices import CURATED_VOICES
+from wellspoken.tts.custom_voices import get_custom_voice, remove_custom_voice
+from wellspoken.tts.voices import all_voices
 from wellspoken.workers import BackgroundTask
 
 
@@ -41,17 +44,26 @@ class ScriptVoiceTab(QWidget):
         voice_row.addWidget(QLabel("Voice:"))
         self.voice_combo = QComboBox()
         self.voice_combo.setMinimumWidth(280)
-        for voice_id, label, _engine in CURATED_VOICES:
-            self.voice_combo.addItem(label, userData=voice_id)
-        current = app.project.voice_name
-        idx = self.voice_combo.findData(current)
-        self.voice_combo.setCurrentIndex(idx if idx >= 0 else 0)
         voice_row.addWidget(self.voice_combo)
-        hint = QLabel("Downloaded automatically the first time you use it.")
-        hint.setProperty("muted", True)
-        voice_row.addWidget(hint)
+        import_voice_btn = QPushButton("Import / Clone Voice...")
+        import_voice_btn.setProperty("flat", True)
+        import_voice_btn.clicked.connect(self.import_voice)
+        voice_row.addWidget(import_voice_btn)
+        self.remove_voice_btn = QPushButton("Remove")
+        self.remove_voice_btn.setProperty("flat", True)
+        self.remove_voice_btn.clicked.connect(self.remove_voice)
+        voice_row.addWidget(self.remove_voice_btn)
         voice_row.addStretch(1)
         layout.addLayout(voice_row)
+        hint = QLabel(
+            "Built-in voices download automatically the first time you use them. Imported/cloned "
+            "voices are cloned from a short reference clip and stay only on this computer."
+        )
+        hint.setProperty("muted", True)
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.voice_combo.currentIndexChanged.connect(self._update_remove_voice_enabled)
+        self._refresh_voice_combo(select=app.project.voice_name)
 
         layout.addWidget(QLabel("Script:"))
         self.script_edit = QTextEdit()
@@ -105,12 +117,78 @@ class ScriptVoiceTab(QWidget):
     def refresh_from_project(self) -> None:
         """Re-sync to self.app.project - called after New/Open Project."""
         self.script_edit.setPlainText(self.app.project.script_text)
-        idx = self.voice_combo.findData(self.app.project.voice_name)
-        self.voice_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._refresh_voice_combo(select=self.app.project.voice_name)
         self.flag_list.clear()
         for seg in self.app.project.segments:
             if seg.flagged:
                 self.flag_list.addItem(seg.text)
+
+    def _refresh_voice_combo(self, select: str | None = None) -> None:
+        select = select if select is not None else self.voice_combo.currentData()
+        self.voice_combo.blockSignals(True)
+        self.voice_combo.clear()
+        for voice_id, label, _engine in all_voices():
+            self.voice_combo.addItem(label, userData=voice_id)
+        idx = self.voice_combo.findData(select)
+        self.voice_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.voice_combo.blockSignals(False)
+        self._update_remove_voice_enabled()
+
+    def _update_remove_voice_enabled(self) -> None:
+        voice_id = self.voice_combo.currentData()
+        self.remove_voice_btn.setEnabled(bool(voice_id) and get_custom_voice(voice_id) is not None)
+
+    def import_voice(self) -> None:
+        if self.app._busy_count > 0:
+            QMessageBox.information(self, "Busy", "Another operation is in progress - please wait for it to finish.")
+            return
+        source_path, _ = QFileDialog.getOpenFileName(
+            self, "Choose a reference clip to clone",
+            "", "Audio/Video (*.wav *.mp3 *.m4a *.flac *.ogg *.mp4 *.mov *.mkv);;All files (*)",
+        )
+        if not source_path:
+            return
+        label, ok = QInputDialog.getText(self, "Name this voice", "Voice name (e.g. an employee's name):")
+        label = label.strip()
+        if not ok or not label:
+            return
+
+        self.progress.start("Importing voice...")
+
+        def work(report):
+            from wellspoken.tts.custom_voices import add_custom_voice
+
+            report("Extracting reference clip...")
+            return add_custom_voice(label, source_path)
+
+        def done(result) -> None:
+            self.app.set_busy(False)
+            cv, warning = result
+            self.progress.stop(f"Imported '{cv.label}'.")
+            self._refresh_voice_combo(select=cv.voice_id)
+            if warning:
+                QMessageBox.warning(self, "Voice imported", warning)
+
+        def error(tb: str) -> None:
+            self.app.set_busy(False)
+            self.progress.stop("Failed.")
+            QMessageBox.critical(self, "Voice import failed", tb)
+
+        self.app.set_busy(True)
+        BackgroundTask(self, work, done, on_error=error, on_progress=self.progress.set_message).start()
+
+    def remove_voice(self) -> None:
+        voice_id = self.voice_combo.currentData()
+        custom = get_custom_voice(voice_id) if voice_id else None
+        if custom is None:
+            return
+        confirm = QMessageBox.question(
+            self, "Remove voice", f"Remove the cloned voice '{custom.label}'? This can't be undone."
+        )
+        if confirm != QMessageBox.Yes:
+            return
+        remove_custom_voice(voice_id)
+        self._refresh_voice_combo()
 
     def _refresh_lexicon_list(self) -> None:
         self.lex_list.clear()
