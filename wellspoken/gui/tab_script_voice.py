@@ -91,6 +91,21 @@ class ScriptVoiceTab(QWidget):
         lex_controls.addWidget(self.respelling_edit)
         lex_controls.addWidget(add_btn)
         lex_controls.addWidget(remove_btn)
+        import_export_row = QHBoxLayout()
+        import_btn = QPushButton("Import...")
+        import_btn.setProperty("flat", True)
+        import_btn.setToolTip(
+            "Load a .json or .csv file of word -> respelling pairs (e.g. one a "
+            "teammate built or exported) and merge it into this lexicon."
+        )
+        import_btn.clicked.connect(self.import_lexicon)
+        export_btn = QPushButton("Export...")
+        export_btn.setProperty("flat", True)
+        export_btn.setToolTip("Save this lexicon to a .csv file to share with teammates.")
+        export_btn.clicked.connect(self.export_lexicon)
+        import_export_row.addWidget(import_btn)
+        import_export_row.addWidget(export_btn)
+        lex_controls.addLayout(import_export_row)
         lex_layout.addLayout(lex_controls)
         layout.addWidget(lex_box)
         self._refresh_lexicon_list()
@@ -214,6 +229,7 @@ class ScriptVoiceTab(QWidget):
         if not word or not respelling:
             return
         self.app.lexicon.set(word, respelling)
+        self._save_lexicon()
         self._refresh_lexicon_list()
         self.word_edit.clear()
         self.respelling_edit.clear()
@@ -224,7 +240,46 @@ class ScriptVoiceTab(QWidget):
             return
         word = item.text().split("  ->  ")[0]
         self.app.lexicon.remove(word)
+        self._save_lexicon()
         self._refresh_lexicon_list()
+
+    def import_lexicon(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import pronunciation lexicon", "", "Lexicon files (*.json *.csv)"
+        )
+        if not path:
+            return
+        try:
+            count = self.app.lexicon.import_file(path)
+        except Exception as exc:
+            QMessageBox.warning(self, "Import failed", f"Could not read {path}:\n{exc}")
+            return
+        self._save_lexicon()
+        self._refresh_lexicon_list()
+        QMessageBox.information(
+            self, "Lexicon imported", f"Imported {count} entries from {os.path.basename(path)}."
+        )
+
+    def export_lexicon(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export pronunciation lexicon", "lexicon.csv", "CSV files (*.csv)"
+        )
+        if not path:
+            return
+        try:
+            self.app.lexicon.export_csv(path)
+        except Exception as exc:
+            QMessageBox.warning(self, "Export failed", f"Could not write {path}:\n{exc}")
+
+    def _save_lexicon(self) -> None:
+        """Persist lexicon edits back to the shared lexicon file so they
+        survive an app restart - previously add/remove only updated the
+        in-memory copy, silently discarding it the next time the app opened
+        (it always reloads from disk at startup, see App.__init__)."""
+        try:
+            self.app.lexicon.save(self.app.lexicon_path)
+        except Exception as exc:
+            QMessageBox.warning(self, "Could not save lexicon", str(exc))
 
     def generate(self) -> None:
         if self.app._busy_count > 0:

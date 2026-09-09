@@ -42,6 +42,7 @@ class App(QMainWindow):
         self.resize(1080, 760)
 
         self.project = Project()
+        self.lexicon_path = DEFAULT_LEXICON_PATH
         self.lexicon = Lexicon.load(DEFAULT_LEXICON_PATH)
         self._voice_engine = None
         self._voice_id = None

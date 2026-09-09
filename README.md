@@ -79,9 +79,21 @@ console window popping up alongside the app.
 
 Words the AI voice mispronounces can be added to the pronunciation lexicon on
 the AI Voice tab (a plain word → respelling map, also editable directly at
-`assets/lexicon_default.json`). A QC pass automatically flags any caption
-line where the synthesized audio didn't match the script, so mispronunciations
-don't slip through silently.
+`assets/lexicon_default.json`). Entries added there are saved back to that
+file automatically, so they persist across restarts and are shared by every
+project. A QC pass automatically flags any caption line where the synthesized
+audio didn't match the script, so mispronunciations don't slip through
+silently.
+
+New installs ship with a starter lexicon of common oil & gas terms
+(`assets/lexicon_default.json`) already loaded. To bring in a larger or
+updated list — e.g. one a colleague built — use **Import...** on the AI Voice
+tab: it accepts a `.json` file (same `{"word": "respelling"}` shape as
+`lexicon_default.json`) or a `.csv` file with `word,respelling` columns (a
+header row is optional), so a non-technical teammate can build a list in
+Excel. Imported entries merge into the existing lexicon, overwriting any
+word already present. **Export...** saves the current lexicon to a `.csv`
+file to hand to someone else.
 
 ## Sharing this with colleagues
 

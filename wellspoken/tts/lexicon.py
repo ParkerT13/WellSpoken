@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import re
 from pathlib import Path
@@ -34,6 +35,49 @@ class Lexicon:
 
     def remove(self, word: str) -> None:
         self.overrides.pop(word, None)
+
+    @staticmethod
+    def _read_pairs(path: str | Path) -> dict[str, str]:
+        """Read word->respelling pairs from a .json or .csv file.
+
+        CSV supports an optional header row (a first row that reads
+        literally "word, respelling", case-insensitive, is skipped) so a
+        teammate can build a list in Excel without knowing the internal
+        format - the two-column shape is the only requirement.
+        """
+        path = Path(path)
+        if path.suffix.lower() == ".csv":
+            pairs: dict[str, str] = {}
+            with open(path, "r", encoding="utf-8-sig", newline="") as f:
+                for i, row in enumerate(csv.reader(f)):
+                    if not row or not row[0].strip():
+                        continue
+                    if i == 0 and [c.strip().lower() for c in row[:2]] == ["word", "respelling"]:
+                        continue
+                    if len(row) < 2 or not row[1].strip():
+                        continue
+                    pairs[row[0].strip()] = row[1].strip()
+            return pairs
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def import_file(self, path: str | Path) -> int:
+        """Merge word->respelling pairs from a .json or .csv file into this
+        lexicon (existing keys are overwritten by the imported value).
+        Returns the number of entries read from the file, for a confirmation
+        message - the point of this is letting a teammate hand over a file of
+        pronunciations built independently (e.g. in Excel) instead of everyone
+        re-typing entries one at a time in the GUI."""
+        pairs = self._read_pairs(path)
+        self.overrides.update(pairs)
+        return len(pairs)
+
+    def export_csv(self, path: str | Path) -> None:
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["word", "respelling"])
+            for word, respelling in sorted(self.overrides.items()):
+                writer.writerow([word, respelling])
 
     MAX_PROMPT_TERMS = 20
 
