@@ -100,8 +100,18 @@ class Lexicon:
         budget; this keeps the list focused on the proper nouns/formation
         names Whisper has never seen in training, which is where prompting
         actually earns its keep.
+
+        SeisWare always goes first regardless of where it falls alphabetically:
+        this product exists specifically to work with the SeisWare SDK, so
+        mishearing it is the one mistake this app can't afford - and it had
+        silently regressed out of the prompt entirely once enough formation
+        names got added before it alphabetically to push it past
+        MAX_PROMPT_TERMS (verified: at 50 candidate terms, "SeisWare" sat at
+        position 23, one past the old cutoff of 20).
         """
         candidates = [w for w in self.overrides if not (w.isupper() and len(w) <= 5)]
+        if "SeisWare" in candidates:
+            candidates = ["SeisWare"] + [w for w in candidates if w != "SeisWare"]
         return ", ".join(candidates[: self.MAX_PROMPT_TERMS])
 
     def _pattern(self) -> re.Pattern:

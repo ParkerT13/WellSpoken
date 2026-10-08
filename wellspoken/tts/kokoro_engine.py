@@ -18,9 +18,13 @@ _ACRONYM_RE = re.compile(r"\b[A-Za-z](?:-[A-Za-z]){1,}\b")
 # Verified empirically: Kokoro's default cadence (speed=1) reads a spelled-out
 # acronym like "R-O-P" noticeably slower/more deliberate than a person
 # actually rattling off letters - this speeds up only those tokens, leaving
-# the rest of the narration's natural pace untouched. Started at 1.35, but
-# that read as "wayyy too fast" per user feedback - dialed back.
-ACRONYM_SPEED = 1.12
+# the rest of the narration's natural pace untouched. Started at 1.35 ("wayyy
+# too fast" per user feedback), dialed back to 1.12 - still reported as too
+# fast on a second listen. Dialed back again to 1.05: measured ~0.44-0.48s
+# per letter at this value vs ~0.43-0.47s/letter at 1.12 and ~0.48-0.52s/letter
+# at the unmodified baseline (speed=1.0) - much closer to natural pace this
+# time. Needs a real listen to confirm, same as the previous two values did.
+ACRONYM_SPEED = 1.05
 
 # KPipeline construction loads the underlying model - expensive, so pipelines
 # are cached per language code and shared across engine instances/voice switches.
