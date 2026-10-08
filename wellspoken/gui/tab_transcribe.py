@@ -32,7 +32,9 @@ class TranscribeTab(QWidget):
             "Use this tab if you already recorded your own narration (or the screen recording "
             "already has your voice on it). Transcribe it, fix any lines the speech-to-text got "
             "wrong below, then optionally send the corrected transcript to the Script -> Voice tab "
-            "to re-record it as a script in a different voice - reword it there before generating."
+            "to re-record it as a script in a different voice - reword it there before generating. "
+            "Got dead air or flubbed takes in the raw audio? Visit the Timeline tab first to trim "
+            "them before transcribing - cleaner audio in means a cleaner transcript out."
         ))
 
         top = QHBoxLayout()

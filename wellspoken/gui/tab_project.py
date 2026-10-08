@@ -32,7 +32,10 @@ class ProjectTab(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(make_hint_label(
             "Pick the screen recording you want to turn into a finished video - or record a new "
-            "one on the Record tab. Then head to the Transcribe or AI Voice tab to add narration and captions."
+            "one on the Record tab. Then head to the Transcribe or AI Voice tab to add narration and "
+            "captions. Recorded your own dialog on this video? Visit the Timeline tab first (before "
+            "Transcribe) to trim dead air/mistakes from it while it's still raw - cleaner audio in "
+            "means a cleaner transcript out."
         ))
 
         top = QHBoxLayout()

@@ -146,7 +146,14 @@ class TimelineTab(QWidget):
         apply_row.addWidget(self.undo_btn)
         layout.addLayout(apply_row)
 
-        layout.addWidget(make_hint_label(
+        # Everything below is only meaningful once there's a script to sync
+        # (the AI Voice workflow) - grouped into one widget so it can be
+        # hidden as a unit while editing raw dialog pre-transcription, where
+        # none of it applies yet (see _update_mode_visibility()).
+        self.marker_section = QWidget()
+        marker_section_layout = QVBoxLayout(self.marker_section)
+        marker_section_layout.setContentsMargins(0, 0, 0, 0)
+        marker_section_layout.addWidget(make_hint_label(
             "Sync markers: play the video above and click \"Add Marker at Playhead\" at each moment "
             "your script should land on (a click, a menu opening, etc.) - they show as green lines "
             "on the timeline above, right alongside the narration waveform. Split your script (in "
@@ -171,17 +178,19 @@ class TimelineTab(QWidget):
         marker_row.addWidget(remove_marker_btn)
         marker_row.addWidget(clear_markers_btn)
         marker_row.addStretch(1)
-        layout.addLayout(marker_row)
+        marker_section_layout.addLayout(marker_row)
 
         self.marker_list = QListWidget()
         self.marker_list.setMaximumHeight(90)
         self.marker_list.itemDoubleClicked.connect(self._seek_to_marker_item)
-        layout.addWidget(self.marker_list)
+        marker_section_layout.addWidget(self.marker_list)
 
         self.generate_synced_btn = QPushButton("Generate Synced Narration")
         self.generate_synced_btn.clicked.connect(self._generate_synced_narration)
         self.app.register_busy_widget(self.generate_synced_btn)
-        layout.addWidget(self.generate_synced_btn)
+        marker_section_layout.addWidget(self.generate_synced_btn)
+
+        layout.addWidget(self.marker_section)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -202,6 +211,7 @@ class TimelineTab(QWidget):
         self.markers = []
         self.marker_list.clear()
         self.duration = 0.0
+        self._update_mode_visibility()
         # A pending undo snapshot points at a now-irrelevant (possibly
         # different) project's files - never apply it across a project switch.
         self._undo_snapshot = None
@@ -268,6 +278,7 @@ class TimelineTab(QWidget):
             self.markers = list(project.sync_markers)
             self._redraw_marker_lines()
             self._refresh_marker_list()
+            self._update_mode_visibility()
             if preview_source:
                 self.media_player.setSource(QUrl.fromLocalFile(preview_source))
             self.progress.stop("Editing raw dialog audio - clean it up before transcribing." if self._raw_mode else "")
@@ -336,6 +347,15 @@ class TimelineTab(QWidget):
 
         self.app.set_busy(True)
         BackgroundTask(self, work, done, on_error=error, on_progress=self.progress.set_message).start()
+
+    def _update_mode_visibility(self) -> None:
+        """Hide controls that don't apply yet in raw mode - Full Preview needs
+        captions, and the marker/sync section exists entirely to sync an AI
+        Voice script to timestamps, neither of which exist before
+        transcription. Both reappear automatically once this tab reloads in
+        narration mode (after transcribing or generating AI voice)."""
+        self.full_preview_btn.setVisible(not self._raw_mode)
+        self.marker_section.setVisible(not self._raw_mode)
 
     def _render_waveform(self, samples: np.ndarray, duration: float, filmstrip: np.ndarray | None = None) -> None:
         self.plot.clear()  # also drops any previous filmstrip ImageItem - re-add below if given a new one
