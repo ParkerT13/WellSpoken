@@ -20,12 +20,17 @@ from PySide6.QtWidgets import (
 from wellspoken.captions.qc import reconcile_tts_captions
 from wellspoken.gui.tab_intro_outro import DEFAULT_LOGO_PATH
 from wellspoken.gui.widgets import ProgressBar, make_hint_label
-from wellspoken.media import audio_mix, ffmpeg_runner, silence, sync, timeline_edit, waveform
+from wellspoken.media import audio_mix, ffmpeg_runner, silence, sync, thumbnails, timeline_edit, vad, waveform
 from wellspoken.media.render_pipeline import IntroOutroSpec, RenderOptions, render
 from wellspoken.transcribe.whisper_engine import transcribe
 from wellspoken.workers import BackgroundTask
 
+# Lets pg.ImageItem (the filmstrip) take plain (row, col, rgb) arrays as
+# produced by PIL/numpy, instead of pyqtgraph's own default (col, row, rgb).
+pg.setConfigOptions(imageAxisOrder="row-major")
+
 WAVEFORM_WIDTH = 2000
+FILMSTRIP_HEIGHT = 7000  # in waveform y-units (int16 PCM range is +-32768) - a band above the waveform, not actual pixels
 SELECTION_BRUSH = pg.mkBrush(47, 111, 237, 80)
 PENDING_CUT_BRUSH = pg.mkBrush(220, 60, 60, 100)
 MARKER_PEN = pg.mkPen(color=(30, 160, 60), width=2)
@@ -40,16 +45,24 @@ class TimelineTab(QWidget):
         self.duration = 0.0
         self.markers: list[float] = []
         self.marker_lines: list[pg.InfiniteLine] = []
+        # True when no narration/TTS track exists yet and this tab is instead
+        # editing the project video's own raw mic audio (the "clean up my
+        # dialog before I transcribe it" path) - see reload().
+        self._raw_mode = False
+        self.filmstrip_item: pg.ImageItem | None = None
 
         layout = QVBoxLayout(self)
         layout.addWidget(make_hint_label(
-            "Trim dead air or mistakes from the narration - drag the blue region to select a "
-            "range and click Cut, or let Auto-Detect find pauses for you. Cuts remove that time "
-            "from both the video and the narration together, so they stay in sync. The video "
-            "preview below plays with the AI narration you're editing (not the recording's own "
-            "audio track, if it has one) so what you hear here matches the waveform. Click "
-            "\"Full Preview\" to see and hear the true final result - narration, captions, and "
-            "music all composited exactly as export will produce them."
+            "Trim dead air or mistakes - drag the blue region to select a range and click Cut, or "
+            "let Auto-Detect find pauses for you. Cuts remove that time from both the video and its "
+            "audio together, so they stay in sync. If you haven't transcribed or generated narration "
+            "yet, this edits your raw recording's own dialog track directly (with a filmstrip above "
+            "the waveform so you can see what's on screen at each point) - clean it up here first for "
+            "a better transcript. Once narration/transcription exists, this tab switches to editing "
+            "that track instead, and the preview below plays it (not the recording's own audio track, "
+            "if it has one) so what you hear matches the waveform. Click \"Full Preview\" to see and "
+            "hear the true final result - narration, captions, and music all composited exactly as "
+            "export will produce them."
         ))
 
         self.video_widget = QVideoWidget()
@@ -169,6 +182,8 @@ class TimelineTab(QWidget):
         different) project's own narration."""
         self.media_player.stop()
         self.plot.clear()
+        self.filmstrip_item = None
+        self._raw_mode = False
         self._clear_pending()
         self.marker_lines.clear()
         self.markers = []
@@ -177,15 +192,37 @@ class TimelineTab(QWidget):
 
     def reload(self) -> None:
         project = self.app.project
-        if not project.narration_audio or not Path(project.narration_audio).exists():
+        has_narration = bool(project.narration_audio) and Path(project.narration_audio).exists()
+        has_raw = (
+            not has_narration
+            and bool(project.source_video)
+            and Path(project.source_video).exists()
+            and ffmpeg_runner.has_audio_track(project.source_video)
+        )
+        if not has_narration and not has_raw:
             QMessageBox.information(
-                self, "No narration", "Generate voice (Script -> Voice) or transcribe audio first."
+                self, "No audio yet",
+                "Select a screen recording with audio on the Project tab to clean up your dialog "
+                "before transcribing, or generate voice (Script -> Voice) / transcribe narration first.",
             )
             return
 
+        self._raw_mode = has_raw
         self.progress.start("Loading waveform...")
 
         def work(report):
+            if self._raw_mode:
+                # Editing the recording's own mic track directly, before any
+                # transcription/narration exists - video and audio are the
+                # same file, so they're already perfectly time-aligned.
+                samples = waveform.extract_pcm(project.source_video, sample_rate=8000)
+                dur = ffmpeg_runner.media_duration(project.source_video)
+                report("Building filmstrip...")
+                filmstrip = thumbnails.generate_filmstrip(
+                    project.source_video, self.app.scratch_dir() / "timeline_filmstrip", strip_width=WAVEFORM_WIDTH
+                )
+                return samples, dur, project.source_video, filmstrip
+
             samples = waveform.extract_pcm(project.narration_audio, sample_rate=8000)
             dur = ffmpeg_runner.media_duration(project.narration_audio)
             # The scrub/edit preview must play the narration being edited, not
@@ -204,19 +241,19 @@ class TimelineTab(QWidget):
                 preview_source = str(proxy)
             else:
                 preview_source = project.source_video
-            return samples, dur, preview_source
+            return samples, dur, preview_source, None
 
         def done(result):
-            samples, dur, preview_source = result
+            samples, dur, preview_source, filmstrip = result
             self.duration = dur
-            self._render_waveform(samples, dur)
+            self._render_waveform(samples, dur, filmstrip)
             self._clear_pending()
             self.markers = list(project.sync_markers)
             self._redraw_marker_lines()
             self._refresh_marker_list()
             if preview_source:
                 self.media_player.setSource(QUrl.fromLocalFile(preview_source))
-            self.progress.stop("")
+            self.progress.stop("Editing raw dialog audio - clean it up before transcribing." if self._raw_mode else "")
 
         def error(tb: str) -> None:
             self.progress.stop("Failed.")
@@ -283,8 +320,9 @@ class TimelineTab(QWidget):
         self.app.set_busy(True)
         BackgroundTask(self, work, done, on_error=error, on_progress=self.progress.set_message).start()
 
-    def _render_waveform(self, samples: np.ndarray, duration: float) -> None:
-        self.plot.clear()
+    def _render_waveform(self, samples: np.ndarray, duration: float, filmstrip: np.ndarray | None = None) -> None:
+        self.plot.clear()  # also drops any previous filmstrip ImageItem - re-add below if given a new one
+        self.filmstrip_item = None
         mins, maxes = waveform.peak_pairs(samples, WAVEFORM_WIDTH)
         times = np.linspace(0, duration, len(maxes)) if len(maxes) else np.zeros(0)
         pen = pg.mkPen(color=(47, 111, 237), width=1)
@@ -292,7 +330,13 @@ class TimelineTab(QWidget):
         self.plot.plot(times, maxes, pen=pen, fillLevel=0, brush=fill)
         self.plot.plot(times, mins, pen=pen, fillLevel=0, brush=fill)
         self.plot.setXRange(0, max(duration, 0.1))
-        self.plot.setYRange(-32768, 32768)
+        if filmstrip is not None:
+            self.filmstrip_item = pg.ImageItem(image=filmstrip)
+            self.filmstrip_item.setRect(0, 32768, max(duration, 0.1), FILMSTRIP_HEIGHT)
+            self.plot.addItem(self.filmstrip_item)
+            self.plot.setYRange(-32768, 32768 + FILMSTRIP_HEIGHT)
+        else:
+            self.plot.setYRange(-32768, 32768)
         self.region.setBounds((0, duration))
         self.region.setRegion((0, min(1.0, duration)))
         self.plot.addItem(self.region)
@@ -319,12 +363,18 @@ class TimelineTab(QWidget):
 
     def _auto_detect(self) -> None:
         project = self.app.project
-        if not project.narration_audio:
-            QMessageBox.information(self, "No narration", "Load a project with narration first.")
+        if self.duration <= 0:
+            QMessageBox.information(self, "Nothing loaded", "Load a project with audio first.")
             return
         self.progress.start("Detecting dead air...")
 
         def work(report):
+            if self._raw_mode:
+                # Raw mic audio has room hum/breath/clicks a flat dB cutoff
+                # misjudges as speech or as silence - VAD tells actual
+                # dead air from quiet speech far more reliably here.
+                report("Loading speech detector...")
+                return vad.detect_dead_air(project.source_video)
             return silence.detect_silence(project.narration_audio)
 
         def done(ranges):
@@ -381,12 +431,18 @@ class TimelineTab(QWidget):
         self.progress.start("Applying cuts...")
         self.apply_btn.setEnabled(False)
         cut_ranges = list(self.cut_ranges)
+        raw_mode = self._raw_mode
 
         def work(report):
+            # Raw mode has no separate narration track yet and no captions to
+            # remap - cut the video against its own audio (apply_cuts' same-
+            # source path already handles that combination).
+            narration_path = project.source_video if raw_mode else project.narration_audio
+            segments = [] if raw_mode else project.segments
             return timeline_edit.apply_cuts(
                 project.source_video,
-                project.narration_audio,
-                project.segments,
+                narration_path,
+                segments,
                 cut_ranges,
                 self.app.scratch_dir() / "timeline",
             )
@@ -394,8 +450,9 @@ class TimelineTab(QWidget):
         def done(result):
             new_video, new_narration, new_segments = result
             project.source_video = str(new_video)
-            project.narration_audio = str(new_narration)
-            project.segments = new_segments
+            if not raw_mode:
+                project.narration_audio = str(new_narration)
+                project.segments = new_segments
             self.app.tab_project._refresh_video_info(str(new_video))
             self.apply_btn.setEnabled(True)
             self.progress.stop("Cuts applied.")

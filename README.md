@@ -20,10 +20,12 @@ env\Scripts\python main.py
 ```
 
 No system-wide `ffmpeg` install is needed — it's bundled via `imageio-ffmpeg`.
-The AI voice models (Kokoro, Chatterbox) and the transcription model
+The AI voice models (Kokoro, Chatterbox), the transcription model
 (faster-whisper, `medium.en` — a larger, more accurate model than the
-`small.en` default, roughly 1.5GB) download automatically the first time you
-use each feature; you'll need internet access for that first run. Screen
+`small.en` default, roughly 1.5GB), and the speech detector used by
+Auto-Detect on raw (pre-transcription) dialog audio (Silero VAD, a few MB)
+download automatically the first time you use each feature; you'll need
+internet access for that first run. Screen
 recording uses Windows' native Windows.Graphics.Capture API (via the
 `windows-capture` package) — no OBS or other external recorder required.
 
@@ -45,18 +47,25 @@ console window popping up alongside the app.
    thumbnail, resolution, and duration. "Append Another Recording..." lets
    you combine two separately-recorded videos (e.g. recorded on different
    days) into one main video before narrating/captioning it.
-3. **Transcribe** — if you already recorded your own narration (or the
+3. **Timeline** — trim dead air or mistakes on a waveform timeline (with a
+   scrubbable video preview). If you recorded your own dialog, this edits
+   that raw track directly first — before you transcribe it — with a
+   filmstrip above the waveform so you can see what's on screen at each
+   point; Auto-Detect uses on-device speech detection (Silero VAD) here so
+   quiet speech and background hum aren't mistaken for dead air. Once
+   narration/transcription exists, this tab switches to editing that track
+   instead (Auto-Detect there uses a simpler volume threshold, which already
+   works well on clean TTS/narration audio). Cuts ripple-delete from both the
+   video and audio together, so they stay in sync — and once captions exist,
+   their timing is remapped to match.
+4. **Transcribe** — if you already recorded your own narration (or the
    recording has your voice on it), transcribe it, fix any misheard lines,
    and optionally send the corrected transcript over to AI Voice to
    re-record it in a synthetic voice.
-4. **AI Voice** — write (or paste) a script, pick a voice, and generate AI
+5. **AI Voice** — write (or paste) a script, pick a voice, and generate AI
    narration with time-synced captions. Four voices across two tiers: Kokoro
    ("Fast" — quick, clean, the default) and Chatterbox ("Expressive" — more
    natural-sounding, noticeably slower on CPU since it's a much larger model).
-5. **Timeline** — trim dead air or mistakes from the narration on a waveform
-   timeline (with a scrubbable video preview). Auto-Detect finds pauses for
-   you; cuts ripple-delete from both the video and the narration together, so
-   they stay in sync.
 6. **Intro / Outro** — add a built-in title card or your own clip at the
    start and/or end.
 7. **Export** — burned-in captions, a separate .srt/.vtt file, or both, with
