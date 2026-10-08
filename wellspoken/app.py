@@ -84,9 +84,9 @@ class App(QMainWindow):
         for tab, icon_name, label in (
             (self.tab_record, "record", "Record"),
             (self.tab_project, "project", "Project"),
-            (self.tab_timeline, "timeline", "Timeline"),
             (self.tab_transcribe, "transcribe", "Transcribe"),
             (self.tab_script_voice, "script_voice", "AI Voice"),
+            (self.tab_timeline, "timeline", "Timeline"),
             (self.tab_intro_outro, "intro_outro", "Intro/Outro"),
             (self.tab_export, "export", "Export"),
         ):

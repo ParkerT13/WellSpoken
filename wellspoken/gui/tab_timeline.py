@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -50,6 +51,11 @@ class TimelineTab(QWidget):
         # dialog before I transcribe it" path) - see reload().
         self._raw_mode = False
         self.filmstrip_item: pg.ImageItem | None = None
+        # One-level undo for Apply Cuts (destructive - overwrites
+        # project.source_video/narration_audio with the cut result, and
+        # there's otherwise no way back short of re-recording). See
+        # _apply_cuts()/_undo_last_cut().
+        self._undo_snapshot: dict | None = None
 
         layout = QVBoxLayout(self)
         layout.addWidget(make_hint_label(
@@ -129,9 +135,16 @@ class TimelineTab(QWidget):
         self.progress = ProgressBar()
         layout.addWidget(self.progress)
 
+        apply_row = QHBoxLayout()
         self.apply_btn = QPushButton("Apply Cuts")
         self.apply_btn.clicked.connect(self._apply_cuts)
-        layout.addWidget(self.apply_btn)
+        self.undo_btn = QPushButton("Undo Last Cut")
+        self.undo_btn.setProperty("flat", True)
+        self.undo_btn.setEnabled(False)
+        self.undo_btn.clicked.connect(self._undo_last_cut)
+        apply_row.addWidget(self.apply_btn)
+        apply_row.addWidget(self.undo_btn)
+        layout.addLayout(apply_row)
 
         layout.addWidget(make_hint_label(
             "Sync markers: play the video above and click \"Add Marker at Playhead\" at each moment "
@@ -189,6 +202,10 @@ class TimelineTab(QWidget):
         self.markers = []
         self.marker_list.clear()
         self.duration = 0.0
+        # A pending undo snapshot points at a now-irrelevant (possibly
+        # different) project's files - never apply it across a project switch.
+        self._undo_snapshot = None
+        self.undo_btn.setEnabled(False)
 
     def reload(self) -> None:
         project = self.app.project
@@ -427,11 +444,27 @@ class TimelineTab(QWidget):
             QMessageBox.information(self, "No video", "Select a screen recording in the Project tab first.")
             return
 
+        # Snapshot what Apply Cuts is about to overwrite, so Undo Last Cut can
+        # restore it - captured here (not in done()) so it reflects state
+        # exactly as it was before this cut, not whatever work() produces.
+        self._undo_snapshot = {
+            "source_video": project.source_video,
+            "narration_audio": project.narration_audio,
+            "segments": list(project.segments),
+        }
+
         self.media_player.stop()
         self.progress.start("Applying cuts...")
         self.apply_btn.setEnabled(False)
         cut_ranges = list(self.cut_ranges)
         raw_mode = self._raw_mode
+        # A fresh subdirectory per cut, not a shared "timeline" one - reusing
+        # the same output filenames across calls (the previous behavior)
+        # meant a second Apply Cuts silently overwrote the first cut's
+        # result file on disk, so anything still pointing at it (like this
+        # undo snapshot, or a project save from mid-session) would silently
+        # end up reading the wrong content instead of what it was saved as.
+        cut_scratch_dir = self.app.scratch_dir() / "timeline" / uuid.uuid4().hex[:10]
 
         def work(report):
             # Raw mode has no separate narration track yet and no captions to
@@ -444,7 +477,7 @@ class TimelineTab(QWidget):
                 narration_path,
                 segments,
                 cut_ranges,
-                self.app.scratch_dir() / "timeline",
+                cut_scratch_dir,
             )
 
         def done(result):
@@ -455,15 +488,31 @@ class TimelineTab(QWidget):
                 project.segments = new_segments
             self.app.tab_project._refresh_video_info(str(new_video))
             self.apply_btn.setEnabled(True)
+            self.undo_btn.setEnabled(True)
             self.progress.stop("Cuts applied.")
             self.reload()
 
         def error(tb: str) -> None:
+            self._undo_snapshot = None
             self.apply_btn.setEnabled(True)
             self.progress.stop("Failed.")
             QMessageBox.critical(self, "Apply failed", tb)
 
         BackgroundTask(self, work, done, on_error=error).start()
+
+    def _undo_last_cut(self) -> None:
+        if not self._undo_snapshot:
+            return
+        project = self.app.project
+        project.source_video = self._undo_snapshot["source_video"]
+        project.narration_audio = self._undo_snapshot["narration_audio"]
+        project.segments = self._undo_snapshot["segments"]
+        self._undo_snapshot = None
+        self.undo_btn.setEnabled(False)
+        if project.source_video:
+            self.app.tab_project._refresh_video_info(project.source_video)
+        self.progress.stop("Last cut undone.")
+        self.reload()
 
     def _add_marker(self) -> None:
         if self.duration <= 0:

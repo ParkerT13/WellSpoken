@@ -47,25 +47,31 @@ console window popping up alongside the app.
    thumbnail, resolution, and duration. "Append Another Recording..." lets
    you combine two separately-recorded videos (e.g. recorded on different
    days) into one main video before narrating/captioning it.
-3. **Timeline** — trim dead air or mistakes on a waveform timeline (with a
-   scrubbable video preview). If you recorded your own dialog, this edits
-   that raw track directly first — before you transcribe it — with a
-   filmstrip above the waveform so you can see what's on screen at each
-   point; Auto-Detect uses on-device speech detection (Silero VAD) here so
-   quiet speech and background hum aren't mistaken for dead air. Once
-   narration/transcription exists, this tab switches to editing that track
-   instead (Auto-Detect there uses a simpler volume threshold, which already
-   works well on clean TTS/narration audio). Cuts ripple-delete from both the
-   video and audio together, so they stay in sync — and once captions exist,
-   their timing is remapped to match.
-4. **Transcribe** — if you already recorded your own narration (or the
+3. **Transcribe** — if you already recorded your own narration (or the
    recording has your voice on it), transcribe it, fix any misheard lines,
    and optionally send the corrected transcript over to AI Voice to
-   re-record it in a synthetic voice.
-5. **AI Voice** — write (or paste) a script, pick a voice, and generate AI
+   re-record it in a synthetic voice. Got mistakes or dead air in your own
+   dialog you'd rather clean up first? Visit the Timeline tab before this
+   one - see below.
+4. **AI Voice** — write (or paste) a script, pick a voice, and generate AI
    narration with time-synced captions. Four voices across two tiers: Kokoro
    ("Fast" — quick, clean, the default) and Chatterbox ("Expressive" — more
    natural-sounding, noticeably slower on CPU since it's a much larger model).
+5. **Timeline** — trim dead air or mistakes from the narration on a waveform
+   timeline (with a scrubbable video preview). Auto-Detect finds pauses for
+   you; cuts ripple-delete from both the video and the narration together, so
+   they stay in sync, and caption timing is remapped to match. "Undo Last
+   Cut" reverts the most recent Apply Cuts if a cut (manual or Auto-Detect)
+   turns out wrong - one level deep, so it won't save you from a string of
+   cuts you didn't mean, but it does mean one bad cut isn't a re-record.
+
+   Visiting this tab before you've transcribed or generated narration edits
+   your raw recording's own dialog track directly instead - with a filmstrip
+   above the waveform so you can see what's on screen at each point - so you
+   can clean up obvious mistakes/dead air before transcribing rather than
+   after. Auto-Detect there uses on-device speech detection (Silero VAD)
+   instead of a volume threshold, since raw mic audio has exactly the quiet
+   speech and background hum a flat threshold misjudges.
 6. **Intro / Outro** — add a built-in title card or your own clip at the
    start and/or end.
 7. **Export** — burned-in captions, a separate .srt/.vtt file, or both, with
